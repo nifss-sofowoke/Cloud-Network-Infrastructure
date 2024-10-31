@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: This CF template creates an autoscaling group of EC2 instances in multiple subnets of a VPC for high-availability and automatic failover capabilities.
+
+Resources:
+# VPC
+  LUBankVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.10.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+
+# Security Group:
+  LuBankSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP & SSH access
+      VpcId: !Ref LUBankVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+# Internet Gateway
+  LUBankInternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+# Attach IG to VPC
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref LUBankVPC
+      InternetGatewayId: !Ref LUBankInternetGateway
+
+# Subnet 1
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref LUBankVPC
+      CidrBlock: 10.10.1.0/24
+      AvailabilityZone: "us-east-1a"
+      MapPublicIpOnLaunch: yes
+
+# Subnet 2
+  Subnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LUBankVPC
+      CidrBlock: 10.10.2.0/24
+      AvailabilityZone: "us-east-1b"
+      MapPublicIpOnLaunch: yes
+
+# Subnet 3
+  Subnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LUBankVPC
+      CidrBlock: 10.10.3.0/24
+      AvailabilityZone: "us-east-1c"
+      MapPublicIpOnLaunch: yes
+
+# Public Route Table
+  LuBankRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref LUBankVPC
+
+# Configuring Public Route Table
+  LURoute:
+    Type: AWS::EC2::Route
+    Properties:
+       RouteTableId: !Ref LUBankRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       GatewayId: !Ref LUBankInternetGateway
+
+# Route association for Subnet 1
+  mySubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet1
+      RouteTableId: !Ref LUBankRouteTable
+        
+# Route association for Subnet 2
+  mySubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet2
+      RouteTableId: !Ref LUBankRouteTable
+
+# Route association for Subnet 3
+  mySubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet3
+      RouteTableId: !Ref LUBankRouteTable
+
+# LaunchTemplate
+  LUBankLaunchTemplate: 
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties: 
+      LaunchTemplateName: LUBankLaunchTemplate
+      LaunchTemplateData:
+        InstanceType: t2.micro
+        ImageId: ami-0f403e3180720dd7e
+        SecurityGroupIds: 
+          - !Ref LUBankSG
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install httpd -y
+            systemctl start httpd
+            systemctl enable httpd
+            amazon-linux-extras install epel -y
+            yum install stress -y
+            echo "<h1>Welcome To Level Up Bank </h1>" > /var/www/html/index.html
+
+# Auto Scaling Group
+  LUBankASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LUBankLaunchTemplate
+        Version: !GetAtt LUBankLaunchTemplate.LatestVersionNumber
+      MaxSize: '5'
+      MinSize: '2'
+      VPCZoneIdentifier:   
+        - !Ref Subnet1
+        - !Ref Subnet2
+        - !Ref Subnet3
+      TargetGroupARNs:
+        - !Ref LUBankALBTargetGroup
+# Scaling Policy
+  LUBankScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref LUBankASG
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: '50'
+
+# Application Load Balancer
+  LUBankApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: "LUBankALB"
+      SecurityGroups: 
+        - !Ref LUBankSG
+      Subnets: 
+        - !Ref Subnet1
+        - !Ref Subnet2
+        - !Ref Subnet3
+
+# ALB Target Group
+  LUBankALBTargetGroup : 
+    Type : 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties : 
+      HealthCheckIntervalSeconds : '30'
+      HealthCheckTimeoutSeconds : '5'
+      Port : '80'
+      Protocol : HTTP
+      VpcId: !Ref LUBankVPC
+
+# ALB Listener
+  LUBankALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref LUBankALBTargetGroup
+      LoadBalancerArn: !Ref LUBankApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+# Cloud Watch Alarm
+  LUCloudWatchAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties: 
+      AlarmActions: 
+        - !Ref LUBankScalingPolicy
+      AlarmDescription: Alarm set for 50% CPU utilization
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LUBankASG
+          Value:
+            Ref: LUBankASG
+      EvaluationPeriods: '1'
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Period: '60'
+      Statistic: Average
+      Threshold: '50'
