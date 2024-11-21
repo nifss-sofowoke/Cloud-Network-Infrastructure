@@ -12,5 +12,5 @@ The CF template in this repo was designed to create and deploy an automated and 
 # Infrastructure Diagram
 <img src="https://miro.medium.com/v2/resize:fit:1400/format:webp/1*a3lCoreZb-p4t5WvA6hvFA.jpeg">
 
-# Project Link
+# Project Documentation Link
 https://medium.com/aws-in-plain-english/building-a-highly-available-network-cloud-infrastructure-with-aws-cloudformation-4feedb5ff16c
