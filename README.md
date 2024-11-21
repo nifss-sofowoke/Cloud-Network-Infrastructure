@@ -1,5 +1,5 @@
 # About This Project
-My purpose for this project was to learn IaC using AWS CloudFormation, and I challenged myself to build and deploy a Network Cloud infrastructure. 
+My purpose for this project was to learn IaC using AWS CloudFormation, and I challenged myself to build and deploy a Cloud Network infrastructure. 
 Basically, this is my first IaC project.
 
 ## AWS CloudFormation Template
